@@ -1,49 +1,50 @@
-# ...existing code...
-from typing import Any, List, Optional, Dict
 from mcp.server.fastmcp import FastMCP
-import pandas as pd
-import os
 
-# Initialize FastMCP server
+from src.routes.services.tools import _load_df
+
 mcp = FastMCP("MovieAnalysis")
 
-DATA_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "top_rated_2000webseries.csv")
-DATA_PATH = os.path.normpath(DATA_PATH)
-
-# lazy-loaded dataframe cache
-_df_cache: Optional[pd.DataFrame] = None
-
-def _load_df() -> pd.DataFrame:
-    global _df_cache
-    if _df_cache is None:
-        _df_cache = pd.read_csv(DATA_PATH, parse_dates=["premiere_date"], encoding="utf-8", low_memory=False)
-        # normalize column names
-        _df_cache.columns = [c.strip() for c in _df_cache.columns]
-    return _df_cache
 
 @mcp.tool()
-def get_column_names() -> List[str]:
-    """
-    Return the column names from the dataset as a list of strings.
-    """
-    df = _load_df()
-    return [str(c) for c in df.columns.tolist()]
+def get_column_names() -> list[str]:
+    """Return the column names available in the TV shows dataset."""
+    return _load_df().columns.tolist()
+
 
 @mcp.tool()
-def average_rating() -> Dict[str, Any]:
-    """
-    Compute the average of the 'rating' column and return it with the count of valid ratings.
-    """
+def average_rating() -> dict:
+    """Compute the average rating across all TV shows in the dataset."""
+    import pandas as pd
     df = _load_df()
-    if 'rating' not in df.columns:
-        return {"error": "column 'rating' not found"}
-    ratings = pd.to_numeric(df['rating'], errors='coerce').dropna()
+    ratings = pd.to_numeric(df["rating"], errors="coerce").dropna()
     if ratings.empty:
-        return {"error": "no valid ratings"}
-    avg = float(ratings.mean())
-    return {"average_rating": round(avg, 3), "count": int(ratings.count())}
+        return {"error": "no valid ratings found"}
+    return {"average_rating": round(float(ratings.mean()), 3), "count": int(len(ratings))}
 
+
+@mcp.tool()
+def search_shows(query: str) -> list[dict]:
+    """Search for TV shows by title or genre. Returns up to 5 matching shows."""
+    df = _load_df()
+    mask = df["title"].str.contains(query, case=False, na=False) | df["genre"].str.contains(
+        query, case=False, na=False
+    )
+    return (
+        df[mask]
+        .head(5)[["title", "genre", "rating", "premiere_date", "overview"]]
+        .to_dict("records")
+    )
+
+
+@mcp.tool()
+def top_shows(n: int = 10) -> list[dict]:
+    """Return the top N highest-rated TV shows. Defaults to top 10."""
+    df = _load_df()
+    return (
+        df.nlargest(n, "rating")[["title", "genre", "rating", "country_origin"]]
+        .to_dict("records")
+    )
 
 
 if __name__ == "__main__":
-    mcp.run(transport='stdio')
+    mcp.run(transport="stdio")
